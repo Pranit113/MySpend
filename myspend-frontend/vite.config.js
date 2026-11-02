@@ -7,6 +7,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 export default defineConfig({
+  base: './', // Ensures assets load cleanly on GitHub Pages (https://pranit113.github.io/MySpend/)
   plugins: [react()],
   resolve: {
     alias: {
