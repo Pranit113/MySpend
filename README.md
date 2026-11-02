@@ -1,5 +1,8 @@
 # MySpend – Personal Expense Tracker
 
+> 🌐 **Live Website**: [https://pranit113.github.io/MySpend/](https://pranit113.github.io/MySpend/)  
+> 📱 **Mobile Ready**: Open the link directly on your smartphone to view and test the application!
+
 A modern, production-ready personal expense and finance tracker designed with **[shadcn/ui](https://ui.shadcn.com/) + Tailwind CSS + React** (frontend) and **Spring Boot 3 + Neon PostgreSQL** (backend) with master password authentication and complete history tracking.
 
 ---
