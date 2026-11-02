@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { api } from '@/api/api'
+import { api, backendUrlStorage, isStaticHost } from '@/api/api'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   Settings as SettingsIcon,
   FileDown,
@@ -13,6 +14,8 @@ import {
   AlertCircle,
   Loader2,
   Lock,
+  Database,
+  Globe,
 } from 'lucide-react'
 
 const today = () => new Date().toISOString().split('T')[0]
@@ -22,7 +25,7 @@ const firstOfMonth = () => {
 }
 
 export default function Settings() {
-  const { logout } = useAuth()
+  const { logout, checkStatus } = useAuth()
 
   // General Settings State
   const [settings, setSettings] = useState({
@@ -52,6 +55,10 @@ export default function Settings() {
   const [passwordMsg, setPasswordMsg] = useState('')
   const [passwordError, setPasswordError] = useState('')
 
+  // Backend URL state
+  const [backendUrl, setBackendUrl] = useState(backendUrlStorage.get())
+  const [backendMsg, setBackendMsg] = useState('')
+
   useEffect(() => {
     api.getSettings()
       .then((s) => {
@@ -75,7 +82,7 @@ export default function Settings() {
         openingBalance: parseFloat(settings.openingBalance) || 0,
         currency: settings.currency || 'INR',
       })
-      setSettingsMsg('Financial settings saved to Neon database!')
+      setSettingsMsg('Financial settings saved!')
       setTimeout(() => setSettingsMsg(''), 4000)
     } catch (err) {
       setSettingsError(err.message || 'Failed to save settings')
@@ -133,6 +140,14 @@ export default function Settings() {
     } finally {
       setChangingPassword(false)
     }
+  }
+
+  const handleSaveBackendUrl = (e) => {
+    e.preventDefault()
+    backendUrlStorage.set(backendUrl)
+    setBackendMsg('Backend connection settings updated!')
+    setTimeout(() => setBackendMsg(''), 4000)
+    checkStatus()
   }
 
   return (
@@ -269,7 +284,7 @@ export default function Settings() {
               </div>
 
               <p className="text-[11px] text-muted-foreground">
-                The generated PDF is formatted cleanly and ready for parents or personal auditing.
+                The statement is formatted cleanly and ready for parents or auditing.
               </p>
             </CardContent>
             <CardFooter>
@@ -287,9 +302,59 @@ export default function Settings() {
                 ) : (
                   <>
                     <FileDown className="mr-2 h-4 w-4" />
-                    Download PDF Report
+                    Download Statement
                   </>
                 )}
+              </Button>
+            </CardFooter>
+          </form>
+        </Card>
+
+        {/* Datastore & Backend Connection */}
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Database className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">Datastore & Cloud Backend</CardTitle>
+              </div>
+              <Badge variant={backendUrl ? 'default' : 'secondary'}>
+                {backendUrl ? 'Custom API Endpoint' : 'Browser Datastore Active'}
+              </Badge>
+            </div>
+            <CardDescription className="text-xs">
+              When using GitHub Pages, data is securely stored in your local browser storage. If you deploy the Spring Boot backend (Render, Railway, or LAN IP), connect it here.
+            </CardDescription>
+          </CardHeader>
+          <form onSubmit={handleSaveBackendUrl}>
+            <CardContent className="space-y-4 max-w-xl">
+              {backendMsg && (
+                <div className="flex items-center gap-2 rounded-md bg-emerald-500/15 p-3 text-xs font-medium text-emerald-800 border border-emerald-500/20">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                  <span>{backendMsg}</span>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <Label htmlFor="backendUrl">Spring Boot Backend URL (Optional)</Label>
+                <div className="relative">
+                  <Input
+                    id="backendUrl"
+                    type="url"
+                    placeholder="e.g. https://myspend-api.onrender.com or http://192.168.0.119:8080"
+                    value={backendUrl}
+                    onChange={(e) => setBackendUrl(e.target.value)}
+                  />
+                  <Globe className="h-4 w-4 text-muted-foreground absolute right-3 top-3" />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Leave empty to use automatic browser storage with full mobile features.
+                </p>
+              </div>
+            </CardContent>
+            <CardFooter>
+              <Button type="submit" variant="outline">
+                Save Connection
               </Button>
             </CardFooter>
           </form>
@@ -303,7 +368,7 @@ export default function Settings() {
               <CardTitle className="text-lg">Security & Master Password</CardTitle>
             </div>
             <CardDescription className="text-xs">
-              Update the master authentication password stored in your Neon database.
+              Update your master authentication password.
             </CardDescription>
           </CardHeader>
           <form onSubmit={handleChangePassword}>

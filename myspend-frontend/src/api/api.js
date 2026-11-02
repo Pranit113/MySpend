@@ -1,6 +1,6 @@
 const TOKEN_KEY = 'myspend_auth_token'
 const BACKEND_URL_KEY = 'myspend_backend_url'
-const LOCAL_DB_KEY = 'myspend_local_db'
+const LOCAL_DB_KEY = 'myspend_local_db_v2'
 
 export const tokenStorage = {
   get: () => localStorage.getItem(TOKEN_KEY),
@@ -14,7 +14,7 @@ export const tokenStorage = {
 export const backendUrlStorage = {
   get: () => localStorage.getItem(BACKEND_URL_KEY) || '',
   set: (url) => {
-    if (url) localStorage.setItem(BACKEND_URL_KEY, url.replace(/\/+$/, ''))
+    if (url) localStorage.setItem(BACKEND_URL_KEY, url.trim().replace(/\/+$/, ''))
     else localStorage.removeItem(BACKEND_URL_KEY)
   },
 }
@@ -38,28 +38,38 @@ function getLocalDb() {
     hasPassword: false,
     password: null,
     settings: {
-      monthlyBudget: 5000,
-      openingBalance: 10000,
+      monthlyBudget: 15000,
+      openingBalance: 25000,
       currency: 'INR',
     },
     transactions: [
       {
         id: 1,
-        amount: 2500,
+        amount: 5000,
         type: 'INCOME',
         source: 'Parents',
         category: null,
-        description: 'Monthly allowance',
+        description: 'Monthly pocket money',
         transactionDate: new Date().toISOString().split('T')[0],
         createdAt: new Date().toISOString(),
       },
       {
         id: 2,
-        amount: 350,
+        amount: 450,
         type: 'EXPENSE',
         source: null,
         category: 'Food',
-        description: 'Dinner with friends',
+        description: 'Lunch with friends',
+        transactionDate: new Date().toISOString().split('T')[0],
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: 3,
+        amount: 1200,
+        type: 'EXPENSE',
+        source: null,
+        category: 'Shopping',
+        description: 'Study materials and books',
         transactionDate: new Date().toISOString().split('T')[0],
         createdAt: new Date().toISOString(),
       },
@@ -73,13 +83,22 @@ function saveLocalDb(db) {
   localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(db))
 }
 
-let isUsingLocalMode = false
+export function isStaticHost() {
+  if (typeof window === 'undefined') return false
+  const host = window.location.hostname
+  const custom = backendUrlStorage.get()
+  // If custom backend URL is provided, try that first
+  if (custom) return false
+  // GitHub Pages or non-local hosts without custom backend are static
+  return host.includes('github.io') || host.includes('vercel.app')
+}
+
+let isUsingLocalMode = isStaticHost()
 export const getIsUsingLocalMode = () => isUsingLocalMode
 
 function getBaseUrl() {
   const custom = backendUrlStorage.get()
   if (custom) return custom + '/api'
-  // Default to relative /api in development/proxy mode
   return '/api'
 }
 
@@ -90,7 +109,7 @@ async function tryServerRequest(method, path, body) {
   if (token) headers['X-Auth-Token'] = token
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 3500)
+  const timeoutId = setTimeout(() => controller.abort(), 3000)
 
   const opts = { method, headers, signal: controller.signal }
   if (body !== undefined) opts.body = JSON.stringify(body)
@@ -103,12 +122,16 @@ async function tryServerRequest(method, path, body) {
       tokenStorage.clear()
       if (onUnauthorizedCallback) onUnauthorizedCallback()
       const err = await res.json().catch(() => ({ error: 'Unauthorized' }))
-      throw new Error(err.error || 'Unauthorized. Please log in.')
+      const error = new Error(err.error || 'Unauthorized. Please log in.')
+      error.status = 401
+      throw error
     }
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Request failed' }))
-      throw new Error(err.error || 'Request failed')
+      const err = await res.json().catch(() => ({}))
+      const error = new Error(err.error || `Request failed (${res.status})`)
+      error.status = res.status
+      throw error
     }
 
     if (res.status === 204) return null
@@ -119,7 +142,7 @@ async function tryServerRequest(method, path, body) {
   }
 }
 
-// Fallback logic for standalone / GitHub Pages hosting when backend server is offline
+// Local in-browser execution with exact same data model & business logic
 function executeLocal(action, payload) {
   isUsingLocalMode = true
   const db = getLocalDb()
@@ -133,9 +156,9 @@ function executeLocal(action, payload) {
         throw new Error('No password set. Please setup master password first.')
       }
       if (db.password !== payload.password) {
-        throw new Error('Incorrect password.')
+        throw new Error('Incorrect master password.')
       }
-      const token = 'local-session-token-' + Date.now()
+      const token = 'local-token-' + Date.now()
       tokenStorage.set(token)
       return { token }
     }
@@ -143,7 +166,7 @@ function executeLocal(action, payload) {
       db.password = payload.password
       db.hasPassword = true
       saveLocalDb(db)
-      return { message: 'Password set successfully.' }
+      return { message: 'Master password set successfully.' }
     }
     case 'logout': {
       tokenStorage.clear()
@@ -267,17 +290,26 @@ function executeLocal(action, payload) {
 }
 
 async function request(action, method, path, body, localPayload = body) {
+  // If static hosting without a remote backend configured, directly use local storage
+  if (isStaticHost()) {
+    return executeLocal(action, localPayload)
+  }
+
   try {
     const res = await tryServerRequest(method, path, body)
     isUsingLocalMode = false
     return res
   } catch (err) {
-    // If server unreachable or erroring out (e.g. static GitHub Pages), fall back to local datastore
+    // If backend is unreachable or 404 (e.g. running on GitHub Pages or server down), fallback gracefully
     if (
+      err.status === 404 ||
+      err.status === 502 ||
+      err.status === 503 ||
+      err.status === 504 ||
       err.name === 'AbortError' ||
       err.message.includes('Failed to fetch') ||
       err.message.includes('NetworkError') ||
-      err.message.includes('404')
+      err.message.includes('Request failed')
     ) {
       return executeLocal(action, localPayload)
     }
@@ -327,6 +359,40 @@ export const api = {
   updateSettings: (data) => request('updateSettings', 'PUT', '/settings', data, data),
 
   exportPdf: async (startDate, endDate) => {
+    if (isStaticHost()) {
+      // Export statement immediately in static host mode
+      const db = getLocalDb()
+      const txns = db.transactions.filter(
+        (t) => t.transactionDate >= startDate && t.transactionDate <= endDate
+      )
+      const content = `
+MySpend – Financial Statement
+Period: ${startDate} to ${endDate}
+=================================================
+Opening Balance: ₹ ${db.settings.openingBalance}
+
+Transactions:
+${txns
+  .map(
+    (t) =>
+      `• [${t.transactionDate}] ${t.type}: ₹${t.amount} (${
+        t.type === 'INCOME' ? t.source : t.category
+      }) - ${t.description || 'No note'}`
+  )
+  .join('\n')}
+=================================================
+Generated via MySpend Mobile Tracker
+      `.trim()
+
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = `myspend_${startDate}_to_${endDate}.txt`
+      link.click()
+      URL.revokeObjectURL(link.href)
+      return
+    }
+
     const base = getBaseUrl()
     const url = `${base}/export/pdf?startDate=${startDate}&endDate=${endDate}`
     const headers = {}
@@ -343,7 +409,6 @@ export const api = {
       link.click()
       URL.revokeObjectURL(link.href)
     } catch {
-      // Client-side statement generation if server is offline
       const db = getLocalDb()
       const txns = db.transactions.filter(
         (t) => t.transactionDate >= startDate && t.transactionDate <= endDate
